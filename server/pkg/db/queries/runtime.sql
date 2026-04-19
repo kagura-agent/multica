@@ -126,6 +126,37 @@ UPDATE agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1;
 
+-- name: AdoptAgentsFromOfflineRuntimes :execrows
+-- Re-points agents from offline runtimes of the same (workspace, provider) to
+-- the newly-registered online runtime. This is a server-side safety net that
+-- prevents agents from being silently stranded on stale runtime_ids after a
+-- daemon restart (e.g. when daemon_id changes or the CLI is upgraded across
+-- identity format changes).
+UPDATE agent
+SET runtime_id = @new_runtime_id, updated_at = now()
+WHERE runtime_id != @new_runtime_id
+  AND runtime_id IN (
+    SELECT id FROM agent_runtime
+    WHERE workspace_id = @workspace_id
+      AND provider = @provider
+      AND status = 'offline'
+  );
+
+-- name: AdoptTasksFromOfflineRuntimes :execrows
+-- Re-points pending tasks from offline runtimes of the same (workspace,
+-- provider) to the newly-registered online runtime. Companion to
+-- AdoptAgentsFromOfflineRuntimes.
+UPDATE agent_task_queue
+SET runtime_id = @new_runtime_id
+WHERE status IN ('queued', 'dispatched')
+  AND runtime_id != @new_runtime_id
+  AND runtime_id IN (
+    SELECT id FROM agent_runtime
+    WHERE workspace_id = @workspace_id
+      AND provider = @provider
+      AND status = 'offline'
+  );
+
 -- name: DeleteStaleOfflineRuntimes :many
 -- Deletes runtimes that have been offline for longer than the TTL and have
 -- no agents bound (active or archived). The FK constraint on agent.runtime_id
