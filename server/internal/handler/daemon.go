@@ -399,10 +399,22 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 func (h *Handler) adoptOrphanedAgents(r *http.Request, registered db.AgentRuntime, provider string) {
 	newID := uuidToString(registered.ID)
 
+	// Skip adoption when OwnerID is unknown (daemon-token auth). Without an
+	// owner scope the queries would match all offline runtimes in the
+	// workspace, which could silently migrate another user's agents.
+	if !registered.OwnerID.Valid {
+		slog.Debug("adopt orphaned agents: skipping, no owner_id on runtime",
+			"runtime_id", newID,
+			"provider", provider,
+		)
+		return
+	}
+
 	agents, err := h.Queries.AdoptAgentsFromOfflineRuntimes(r.Context(), db.AdoptAgentsFromOfflineRuntimesParams{
 		NewRuntimeID: registered.ID,
 		WorkspaceID:  registered.WorkspaceID,
 		Provider:     provider,
+		OwnerID:      registered.OwnerID,
 	})
 	if err != nil {
 		slog.Warn("adopt orphaned agents: reassign failed",
@@ -417,11 +429,13 @@ func (h *Handler) adoptOrphanedAgents(r *http.Request, registered db.AgentRuntim
 		NewRuntimeID: registered.ID,
 		WorkspaceID:  registered.WorkspaceID,
 		Provider:     provider,
+		OwnerID:      registered.OwnerID,
 	})
 	if err != nil {
 		slog.Warn("adopt orphaned agents: reassign tasks failed",
 			"runtime_id", newID,
 			"provider", provider,
+			"agents_adopted", agents,
 			"error", err,
 		)
 	}

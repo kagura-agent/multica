@@ -136,6 +136,7 @@ WHERE runtime_id != @new_runtime_id
     SELECT id FROM agent_runtime
     WHERE workspace_id = @workspace_id
       AND provider = @provider
+      AND owner_id = @owner_id
       AND status = 'offline'
   );
 
@@ -151,6 +152,7 @@ WHERE status IN ('queued', 'dispatched')
     SELECT id FROM agent_runtime
     WHERE workspace_id = @workspace_id
       AND provider = @provider
+      AND owner_id = @owner_id
       AND status = 'offline'
   );
 

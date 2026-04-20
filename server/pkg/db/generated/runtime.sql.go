@@ -19,6 +19,7 @@ WHERE runtime_id != $1
     SELECT id FROM agent_runtime
     WHERE workspace_id = $2
       AND provider = $3
+      AND owner_id = $4
       AND status = 'offline'
   )
 `
@@ -27,15 +28,16 @@ type AdoptAgentsFromOfflineRuntimesParams struct {
 	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
 	WorkspaceID  pgtype.UUID `json:"workspace_id"`
 	Provider     string      `json:"provider"`
+	OwnerID      pgtype.UUID `json:"owner_id"`
 }
 
-// Re-points agents from offline runtimes of the same (workspace, provider) to
-// the newly-registered online runtime. This is a server-side safety net that
-// prevents agents from being silently stranded on stale runtime_ids after a
-// daemon restart (e.g. when daemon_id changes or the CLI is upgraded across
-// identity format changes).
+// Re-points agents from offline runtimes of the same (workspace, provider,
+// owner) to the newly-registered online runtime. This is a server-side safety
+// net that prevents agents from being silently stranded on stale runtime_ids
+// after a daemon restart (e.g. when daemon_id changes or the CLI is upgraded
+// across identity format changes).
 func (q *Queries) AdoptAgentsFromOfflineRuntimes(ctx context.Context, arg AdoptAgentsFromOfflineRuntimesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, adoptAgentsFromOfflineRuntimes, arg.NewRuntimeID, arg.WorkspaceID, arg.Provider)
+	result, err := q.db.Exec(ctx, adoptAgentsFromOfflineRuntimes, arg.NewRuntimeID, arg.WorkspaceID, arg.Provider, arg.OwnerID)
 	if err != nil {
 		return 0, err
 	}
@@ -51,6 +53,7 @@ WHERE status IN ('queued', 'dispatched')
     SELECT id FROM agent_runtime
     WHERE workspace_id = $2
       AND provider = $3
+      AND owner_id = $4
       AND status = 'offline'
   )
 `
@@ -59,13 +62,14 @@ type AdoptTasksFromOfflineRuntimesParams struct {
 	NewRuntimeID pgtype.UUID `json:"new_runtime_id"`
 	WorkspaceID  pgtype.UUID `json:"workspace_id"`
 	Provider     string      `json:"provider"`
+	OwnerID      pgtype.UUID `json:"owner_id"`
 }
 
 // Re-points pending tasks from offline runtimes of the same (workspace,
-// provider) to the newly-registered online runtime. Companion to
+// provider, owner) to the newly-registered online runtime. Companion to
 // AdoptAgentsFromOfflineRuntimes.
 func (q *Queries) AdoptTasksFromOfflineRuntimes(ctx context.Context, arg AdoptTasksFromOfflineRuntimesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, adoptTasksFromOfflineRuntimes, arg.NewRuntimeID, arg.WorkspaceID, arg.Provider)
+	result, err := q.db.Exec(ctx, adoptTasksFromOfflineRuntimes, arg.NewRuntimeID, arg.WorkspaceID, arg.Provider, arg.OwnerID)
 	if err != nil {
 		return 0, err
 	}
