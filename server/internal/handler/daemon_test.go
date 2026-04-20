@@ -1507,7 +1507,7 @@ func TestDaemonRegister_AdoptsAgentsFromOfflineRuntime(t *testing.T) {
 	var offlineRuntimeID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
-		VALUES ($1, $2, 'old-runtime', 'local', 'claude', 'offline', 'old-machine', '{}'::jsonb, $3, now() - interval '1 hour')
+		VALUES ($1, $2, 'old-runtime', 'local', 'claude-adopt-test', 'offline', 'old-machine', '{}'::jsonb, $3, now() - interval '1 hour')
 		RETURNING id
 	`, testWorkspaceID, oldDaemonID, testUserID).Scan(&offlineRuntimeID); err != nil {
 		t.Fatalf("seed offline runtime: %v", err)
@@ -1557,7 +1557,7 @@ func TestDaemonRegister_AdoptsAgentsFromOfflineRuntime(t *testing.T) {
 		"daemon_id":    newDaemonID,
 		"device_name":  "NewMachine",
 		"runtimes": []map[string]any{
-			{"name": "new-runtime", "type": "claude", "version": "2.0.0", "status": "online"},
+			{"name": "new-runtime", "type": "claude-adopt-test", "version": "2.0.0", "status": "online"},
 		},
 	})
 	testHandler.DaemonRegister(w, req)
@@ -1607,7 +1607,7 @@ func TestDaemonRegister_DoesNotAdoptFromOnlineRuntime(t *testing.T) {
 	var onlineRuntimeID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
-		VALUES ($1, $2, 'online-runtime', 'local', 'claude', 'online', 'active-machine', '{}'::jsonb, $3, now())
+		VALUES ($1, $2, 'online-runtime', 'local', 'claude-adopt-test', 'online', 'active-machine', '{}'::jsonb, $3, now())
 		RETURNING id
 	`, testWorkspaceID, existingDaemonID, testUserID).Scan(&onlineRuntimeID); err != nil {
 		t.Fatalf("seed online runtime: %v", err)
@@ -1636,7 +1636,7 @@ func TestDaemonRegister_DoesNotAdoptFromOnlineRuntime(t *testing.T) {
 		"daemon_id":    newDaemonID,
 		"device_name":  "AnotherMachine",
 		"runtimes": []map[string]any{
-			{"name": "another-runtime", "type": "claude", "version": "2.0.0", "status": "online"},
+			{"name": "another-runtime", "type": "claude-adopt-test", "version": "2.0.0", "status": "online"},
 		},
 	})
 	testHandler.DaemonRegister(w, req)
