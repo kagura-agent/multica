@@ -189,6 +189,19 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		// When the provider omits the model name from streamed messages
+		// (e.g. OpenRouter), usage is keyed under "". Re-key it under
+		// the configured model so the dashboard shows a useful name.
+		if u, ok := usage[""]; ok && opts.Model != "" {
+			existing := usage[opts.Model]
+			existing.InputTokens += u.InputTokens
+			existing.OutputTokens += u.OutputTokens
+			existing.CacheReadTokens += u.CacheReadTokens
+			existing.CacheWriteTokens += u.CacheWriteTokens
+			usage[opts.Model] = existing
+			delete(usage, "")
+		}
+
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
 		if reportedSessionID != sessionID {
 			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
@@ -216,14 +229,17 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		return
 	}
 
-	// Accumulate token usage per model.
-	if content.Usage != nil && content.Model != "" {
-		u := usage[content.Model]
+	// Accumulate token usage per model. When the provider omits the
+	// model field (e.g. OpenRouter-proxied responses), key under "" so
+	// the caller can re-key against the configured model.
+	if content.Usage != nil {
+		key := content.Model // may be "" if provider doesn't populate it
+		u := usage[key]
 		u.InputTokens += content.Usage.InputTokens
 		u.OutputTokens += content.Usage.OutputTokens
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
-		usage[content.Model] = u
+		usage[key] = u
 	}
 
 	for _, block := range content.Content {

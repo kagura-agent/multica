@@ -1141,10 +1141,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	)
 
 	// Convert agent usage map to task usage entries.
+	// Backends that cannot extract the model from the agent stream use
+	// "unknown" as the key; substitute the configured model when available.
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
 		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
 			continue
+		}
+		if (model == "unknown" || model == "") && execOpts.Model != "" {
+			model = execOpts.Model
 		}
 		usageEntries = append(usageEntries, TaskUsageEntry{
 			Provider:         provider,
