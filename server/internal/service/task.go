@@ -235,10 +235,12 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(agentID))
 
-	// Update agent status to working. Hits the DB and may publish events,
-	// so it must be inside the timed window.
+	// Reconcile agent status based on running task count instead of
+	// unconditionally setting "working". This prevents a race where a
+	// concurrent CancelTask sets the agent back to "idle" before this
+	// write lands, leaving the agent stuck at "working" (#1707).
 	t0 = time.Now()
-	s.updateAgentStatus(ctx, agentID, "working")
+	s.ReconcileAgentStatus(ctx, agentID)
 	updateStatusMs = time.Since(t0).Milliseconds()
 
 	// Broadcast task:dispatch. ResolveTaskWorkspaceID inside this path can
