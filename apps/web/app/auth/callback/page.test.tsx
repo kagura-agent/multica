@@ -67,16 +67,15 @@ describe("CallbackPage", () => {
     mockListWorkspaces.mockResolvedValue([]);
   });
 
-  it("unonboarded user lands on /onboarding regardless of next=", async () => {
+  it("unonboarded user with next= honors the safe target (invite link)", async () => {
     mockSearchParams.set("state", "next:/invite/abc123");
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
     });
-    expect(mockPush).not.toHaveBeenCalledWith("/invite/abc123");
   });
 
-  it("unonboarded user with no next= also lands on /onboarding", async () => {
+  it("unonboarded user with no next= and no workspaces lands on /onboarding", async () => {
     render(<CallbackPage />);
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
