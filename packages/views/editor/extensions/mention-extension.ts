@@ -39,17 +39,21 @@ export const BaseMentionExtension = Mention.extend({
     name: "mention",
     level: "inline" as const,
     start(src: string) {
-      return src.search(/\[@?[^\]]+\]\(mention:\/\//);
+      return src.search(/\[@?.+?\]\(mention:\/\//);
     },
     tokenize(src: string) {
+      // Use .+? (non-greedy) instead of [^\]]+ so labels containing
+      // square brackets (e.g. "David[TF]") are matched correctly.
       const match = src.match(
-        /^\[@?([^\]]+)\]\(mention:\/\/(\w+)\/([^)]+)\)/,
+        /^\[@?(.+?)\]\(mention:\/\/(\w+)\/([^)]+)\)/,
       );
       if (!match) return undefined;
+      // Unescape backslash-escaped brackets that renderMarkdown may produce.
+      const rawLabel = match[1].replace(/\\\[/g, "[").replace(/\\\]/g, "]");
       return {
         type: "mention",
         raw: match[0],
-        attributes: { label: match[1], type: match[2] ?? "member", id: match[3] },
+        attributes: { label: rawLabel, type: match[2] ?? "member", id: match[3] },
       };
     },
   },
@@ -59,6 +63,9 @@ export const BaseMentionExtension = Mention.extend({
   renderMarkdown: (node: any) => {
     const { id, label, type = "member" } = node.attrs || {};
     const prefix = type === "issue" ? "" : "@";
-    return `[${prefix}${label ?? id}](mention://${type}/${id})`;
+    // Escape square brackets in the label so the markdown link syntax
+    // is not broken when the name contains [ or ] (e.g. "David[TF]").
+    const safeLabel = (label ?? id).replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+    return `[${prefix}${safeLabel}](mention://${type}/${id})`;
   },
 });
