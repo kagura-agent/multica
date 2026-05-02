@@ -36,7 +36,8 @@ var loginCmd = &cobra.Command{
 }
 
 func init() {
-	loginCmd.Flags().Bool("token", false, "Authenticate by pasting a personal access token")
+	loginCmd.Flags().String("token", "", "Authenticate with a personal access token (omit value to be prompted)")
+	loginCmd.Flag("token").NoOptDefVal = "__prompt__"
 	loginCmd.Flags().String(callbackHostFlag, "", "Host the OAuth callback URL points at (auto-detected from the server's route when empty). Use this for reverse-proxy / FQDN setups where auto-detection picks the wrong interface.")
 }
 

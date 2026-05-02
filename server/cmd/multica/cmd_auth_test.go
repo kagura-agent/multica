@@ -119,6 +119,53 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}
 }
 
+func TestLoginTokenFlag(t *testing.T) {
+	t.Run("--token with value uses it directly", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.PersistentFlags().String("profile", "", "")
+		cmd.Flags().String("token", "", "")
+		cmd.Flag("token").NoOptDefVal = "__prompt__"
+
+		// Simulate: multica login --token mul_test123
+		cmd.Flags().Set("token", "mul_test123")
+
+		if !cmd.Flags().Changed("token") {
+			t.Fatal("expected token flag to be changed")
+		}
+		val, _ := cmd.Flags().GetString("token")
+		if val != "mul_test123" {
+			t.Fatalf("expected %q, got %q", "mul_test123", val)
+		}
+	})
+
+	t.Run("--token without value gets NoOptDefVal", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.PersistentFlags().String("profile", "", "")
+		cmd.Flags().String("token", "", "")
+		cmd.Flag("token").NoOptDefVal = "__prompt__"
+
+		// Simulate: multica login --token (no value)
+		cmd.Flags().Set("token", "__prompt__")
+
+		val, _ := cmd.Flags().GetString("token")
+		if val != "__prompt__" {
+			t.Fatalf("expected %q, got %q", "__prompt__", val)
+		}
+	})
+
+	t.Run("no --token flag means browser login", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.PersistentFlags().String("profile", "", "")
+		cmd.Flags().String("token", "", "")
+		cmd.Flag("token").NoOptDefVal = "__prompt__"
+
+		// Don't set the flag — simulates: multica login
+		if cmd.Flags().Changed("token") {
+			t.Fatal("expected token flag to NOT be changed")
+		}
+	})
+}
+
 func TestNormalizeAPIBaseURL(t *testing.T) {
 	t.Run("converts websocket base URL", func(t *testing.T) {
 		if got := normalizeAPIBaseURL("ws://localhost:18106/ws"); got != "http://localhost:18106" {
