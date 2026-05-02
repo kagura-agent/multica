@@ -49,7 +49,7 @@ export const BaseMentionExtension = Mention.extend({
       );
       if (!match) return undefined;
       // Unescape backslash-escaped brackets that renderMarkdown may produce.
-      const rawLabel = match[1].replace(/\\\[/g, "[").replace(/\\\]/g, "]");
+      const rawLabel = match[1]?.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
       return {
         type: "mention",
         raw: match[0],
