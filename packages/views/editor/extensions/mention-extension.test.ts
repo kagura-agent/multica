@@ -2,15 +2,17 @@ import { describe, it, expect } from "vitest";
 import { BaseMentionExtension } from "./mention-extension";
 
 const tokenizer = BaseMentionExtension.config.markdownTokenizer!;
-const renderMarkdown = BaseMentionExtension.config.renderMarkdown!;
 
-// The tiptap MarkdownTokenizer type allows `start` to be a string or function
-// and `tokenize` to accept 3 args (src, tokens, lexer). Our extension always
-// provides functions with the signatures below, so cast for test convenience.
+// The tiptap MarkdownTokenizer/renderMarkdown types have broad signatures
+// (multi-arg overloads). Our extension always provides single-argument
+// implementations, so cast for test convenience.
 const startFn = tokenizer.start as (src: string) => number;
 const tokenizeFn = tokenizer.tokenize as (
   src: string,
 ) => { type: string; raw: string; attributes: Record<string, string> } | undefined;
+const renderMarkdown = BaseMentionExtension.config.renderMarkdown as (
+  node: { attrs: Record<string, string> },
+) => string;
 
 function tokenize(src: string) {
   const start = startFn(src);
