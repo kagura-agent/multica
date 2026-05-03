@@ -39,13 +39,17 @@ export const BaseMentionExtension = Mention.extend({
     name: "mention",
     level: "inline" as const,
     start(src: string) {
-      return src.search(/\[@?.+?\]\(mention:\/\//);
+      // Accept escaped brackets (\\[ \\]) and non-] chars in the label.
+      // This prevents matching ordinary Markdown links like [docs](url)
+      // that appear before a mention on the same line.
+      return src.search(/\[@?(?:\\.|[^\]])+\]\(mention:\/\//);
     },
     tokenize(src: string) {
-      // Use .+? (non-greedy) instead of [^\]]+ so labels containing
-      // square brackets (e.g. "David[TF]") are matched correctly.
+      // Label accepts escaped chars (\\[ \\]) or any non-] character.
+      // This prevents the label from crossing a ]( Markdown link boundary
+      // while still supporting bracket-containing names like "David\[TF\]".
       const match = src.match(
-        /^\[@?(.+?)\]\(mention:\/\/(\w+)\/([^)]+)\)/,
+        /^\[@?((?:\\.|[^\]])+)\]\(mention:\/\/(\w+)\/([^)]+)\)/,
       );
       if (!match) return undefined;
       // Unescape backslash-escaped brackets that renderMarkdown may produce.
