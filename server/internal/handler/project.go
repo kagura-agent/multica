@@ -28,8 +28,9 @@ type ProjectResponse struct {
 	LeadID      *string `json:"lead_id"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
-	IssueCount  int64   `json:"issue_count"`
-	DoneCount   int64   `json:"done_count"`
+	IssueCount  int64                     `json:"issue_count"`
+	DoneCount   int64                     `json:"done_count"`
+	Resources   []ProjectResourceResponse  `json:"resources,omitempty"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -157,6 +158,12 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
+	if resources, err := h.Queries.ListProjectResources(r.Context(), project.ID); err == nil && len(resources) > 0 {
+		resp.Resources = make([]ProjectResourceResponse, len(resources))
+		for i, r := range resources {
+			resp.Resources[i] = projectResourceToResponse(r)
+		}
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
