@@ -289,6 +289,12 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Check workspace-level always-redact setting.
+	var alwaysRedact bool
+	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
+		alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+	}
+
 	// Resolve the request actor once. Agents bypass the private-agent gate
 	// to preserve A2A collaboration; members must be in allowed_principals
 	// (agent owner or workspace owner/admin) to see private agents.
@@ -304,8 +310,9 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
-		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
-		if !canViewAgentEnv(a, userID, member.Role) {
+		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin,
+		// or unconditionally when the workspace opts into always_redact_env.
+		if alwaysRedact || !canViewAgentEnv(a, userID, member.Role) {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
 		}
@@ -352,9 +359,17 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
+	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin,
+	// or unconditionally when the workspace opts into always_redact_env.
 	userID := requestUserID(r)
-	if member, ok := ctxMember(r.Context()); ok {
+	var alwaysRedact bool
+	if ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID); err == nil {
+		alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+	}
+	if alwaysRedact {
+		redactEnv(&resp)
+		redactMcpConfig(&resp)
+	} else if member, ok := ctxMember(r.Context()); ok {
 		if !canViewAgentEnv(agent, userID, member.Role) {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
@@ -555,6 +570,24 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
+}
+
+// workspaceAlwaysRedactEnv checks whether the workspace has opted into
+// unconditional redaction of custom_env and mcp_config on read responses,
+// regardless of the caller's role. This is useful for single-tenant
+// self-hosts or security-conscious teams that never want plaintext secrets
+// returned from the API.
+func workspaceAlwaysRedactEnv(settings []byte) bool {
+	if len(settings) == 0 {
+		return false
+	}
+	var s struct {
+		AlwaysRedactEnv bool `json:"always_redact_env"`
+	}
+	if err := json.Unmarshal(settings, &s); err != nil {
+		return false
+	}
+	return s.AlwaysRedactEnv
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
