@@ -2,7 +2,5 @@
 
 package util
 
-import "os/exec"
-
-// HideConsoleWindow is a no-op on non-Windows platforms.
-func HideConsoleWindow(cmd *exec.Cmd) {}
+// EnsureHiddenConsole is a no-op on non-Windows platforms.
+func EnsureHiddenConsole() {}

@@ -2,23 +2,30 @@
 
 package util
 
-import (
-	"os/exec"
-	"syscall"
+import "syscall"
+
+var (
+	kernel32          = syscall.NewLazyDLL("kernel32.dll")
+	user32            = syscall.NewLazyDLL("user32.dll")
+	procAllocConsole  = kernel32.NewProc("AllocConsole")
+	procGetConsoleWnd = kernel32.NewProc("GetConsoleWindow")
+	procShowWindow    = user32.NewProc("ShowWindow")
 )
 
-// createNewConsole allocates a fresh console for the child process. Combined
-// with HideWindow=true (STARTF_USESHOWWINDOW + SW_HIDE) the console window
-// stays off-screen, and any grandchildren inherit this hidden console instead
-// of each allocating their own visible one.
-const createNewConsole = 0x00000010
+const swHide = 0
 
-// HideConsoleWindow configures cmd to suppress the console window on Windows
-// while still giving descendant processes a hidden console to inherit.
-func HideConsoleWindow(cmd *exec.Cmd) {
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
+// EnsureHiddenConsole guarantees the daemon owns a console that is not
+// visible to the user. Every child process (git, cmd, etc.) inherits this
+// hidden console automatically, so no per-call SysProcAttr gymnastics are
+// needed.
+func EnsureHiddenConsole() {
+	if hwnd, _, _ := procGetConsoleWnd.Call(); hwnd != 0 {
+		return // already have a console
 	}
-	cmd.SysProcAttr.HideWindow = true
-	cmd.SysProcAttr.CreationFlags |= createNewConsole
+	if r, _, _ := procAllocConsole.Call(); r == 0 {
+		return // AllocConsole failed
+	}
+	if hwnd, _, _ := procGetConsoleWnd.Call(); hwnd != 0 {
+		procShowWindow.Call(hwnd, swHide)
+	}
 }
