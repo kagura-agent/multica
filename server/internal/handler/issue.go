@@ -1349,10 +1349,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
+	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
+
 	// Auto-subscribe the creator so they receive notifications for follow-up
 	// activity (comments, status changes, agent updates). The quick-create
 	// path already does this in task.go; this covers the normal create path.
 	// Best-effort: log on failure but don't block the response.
+	// Published after issue:created so WS listeners see the issue event first.
 	if creatorType == "member" {
 		if err := h.Queries.AddIssueSubscriber(r.Context(), db.AddIssueSubscriberParams{
 			IssueID:  issue.ID,
@@ -1374,9 +1378,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-
-	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
-	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
 	analyticsActorID := actualCreatorID
 	analyticsAgentID := ""
 	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" {
