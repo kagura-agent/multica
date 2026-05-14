@@ -875,18 +875,28 @@ func TestWebSocketIntegration(t *testing.T) {
 	readJSON(t, resp, &issue)
 	issueID := issue["id"].(string)
 
-	// Read the WebSocket message
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error: %v", err)
+	// readWSEvent reads the next WebSocket message, skipping any
+	// subscriber:added/removed events emitted by auto-subscribe.
+	readWSEvent := func(expected string) map[string]any {
+		for {
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatalf("WebSocket read error waiting for %s: %v", expected, err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatalf("failed to parse WebSocket message: %v", err)
+			}
+			if m["type"] == "subscriber:added" || m["type"] == "subscriber:removed" {
+				continue
+			}
+			return m
+		}
 	}
 
 	// Verify the message contains the issue event
-	var wsMsg map[string]any
-	if err := json.Unmarshal(msg, &wsMsg); err != nil {
-		t.Fatalf("failed to parse WebSocket message: %v", err)
-	}
+	wsMsg := readWSEvent("issue:created")
 	if wsMsg["type"] != "issue:created" {
 		t.Fatalf("expected type 'issue:created', got '%s'", wsMsg["type"])
 	}
@@ -897,13 +907,7 @@ func TestWebSocketIntegration(t *testing.T) {
 	})
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on update: %v", err)
-	}
-	var updateMsg map[string]any
-	json.Unmarshal(msg, &updateMsg)
+	updateMsg := readWSEvent("issue:updated")
 	if updateMsg["type"] != "issue:updated" {
 		t.Fatalf("expected type 'issue:updated', got '%s'", updateMsg["type"])
 	}
@@ -912,13 +916,7 @@ func TestWebSocketIntegration(t *testing.T) {
 	resp = authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on delete: %v", err)
-	}
-	var deleteMsg map[string]any
-	json.Unmarshal(msg, &deleteMsg)
+	deleteMsg := readWSEvent("issue:deleted")
 	if deleteMsg["type"] != "issue:deleted" {
 		t.Fatalf("expected type 'issue:deleted', got '%s'", deleteMsg["type"])
 	}
