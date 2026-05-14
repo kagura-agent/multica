@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -826,6 +826,29 @@ export function useRealtimeSync(
     };
   }, [ws, qc, authStore, onToast]);
 
+  // Shared invalidation for recovering missed WS events. Used by both the
+  // reconnect handler (same WSClient reconnects after network drop) and the
+  // workspace-switch handler (provider.tsx tears down old WSClient, creates
+  // a new one — onReconnect never fires for the fresh instance).
+  const invalidateAllStaleQueries = useCallback(() => {
+    const wsId = getCurrentWsId();
+    if (wsId) {
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    }
+    qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+  }, [qc]);
+
   // Reconnect -> refetch all data to recover missed events
   useEffect(() => {
     if (!ws) return;
@@ -833,26 +856,27 @@ export function useRealtimeSync(
     const unsub = ws.onReconnect(async () => {
       logger.info("reconnected, refetching all data");
       try {
-        const wsId = getCurrentWsId();
-        if (wsId) {
-          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
-        }
-        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+        invalidateAllStaleQueries();
       } catch (e) {
         logger.error("reconnect refetch failed", e);
       }
     });
 
     return unsub;
-  }, [ws, qc]);
+  }, [ws, invalidateAllStaleQueries]);
+
+  // Workspace-switch recovery: when provider.tsx tears down the old WSClient
+  // and creates a new one for the destination workspace, the onReconnect
+  // callback above never fires (it only triggers for reconnections within
+  // the *same* WSClient instance). Detect the instance change and invalidate
+  // all queries so the UI picks up events that were missed while the user
+  // was in another workspace.
+  const prevWsRef = useRef<WSClient | null>(null);
+  useEffect(() => {
+    if (ws && prevWsRef.current && prevWsRef.current !== ws) {
+      logger.info("ws instance changed (workspace switch), invalidating stale queries");
+      invalidateAllStaleQueries();
+    }
+    prevWsRef.current = ws;
+  }, [ws, invalidateAllStaleQueries]);
 }
