@@ -258,7 +258,35 @@ func gitCloneBare(url, dest string) error {
 		os.RemoveAll(dest)
 		return fmt.Errorf("configure fetch refspec: %w", err)
 	}
+	sanitizeRemoteURL(dest)
 	return nil
+}
+
+// sanitizeRemoteURL strips embedded credentials from the bare cache's
+// remote.origin.url if present. An external process (or a user-supplied
+// clone URL) may embed user:password in the URL; worktrees inherit the
+// bare cache's remote config, so credentials would leak into every
+// worktree's git environment. Best-effort: failures are silently ignored.
+func sanitizeRemoteURL(barePath string) {
+	cmd := exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.url")
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	raw := strings.TrimSpace(string(out))
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return // SSH scp-style or unparseable — nothing to strip
+	}
+	if u.User == nil {
+		return // no credentials embedded
+	}
+	u.User = nil
+	clean := u.String()
+	setURL := exec.Command("git", "-C", barePath, "remote", "set-url", "origin", clean)
+	setURL.Env = gitEnv()
+	_ = setURL.Run()
 }
 
 // gitFetch runs `git fetch origin` on a bare cache, migrating its fetch
@@ -408,6 +436,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			"error", err,
 		)
 	}
+	sanitizeRemoteURL(barePath)
 
 	// Determine the ref to base the worktree on. By default this is the remote's
 	// default branch (resolved internally via getRemoteDefaultBranch, which walks

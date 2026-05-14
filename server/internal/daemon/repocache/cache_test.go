@@ -1411,6 +1411,86 @@ func TestRemoveCoAuthoredByHookPreservesUserHook(t *testing.T) {
 	}
 }
 
+// TestSanitizeRemoteURL verifies that embedded credentials in a bare cache's
+// remote.origin.url are stripped after clone or fetch.
+func TestSanitizeRemoteURL(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+
+	// Inject a credential-embedded URL into the bare cache.
+	credURL := "https://user:token@github.com/org/repo.git"
+	cmd := exec.Command("git", "-C", barePath, "remote", "set-url", "origin", credURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url failed: %s: %v", out, err)
+	}
+
+	sanitizeRemoteURL(barePath)
+
+	got := gitConfigGet(t, barePath, "remote.origin.url")
+	if strings.Contains(got, "user") || strings.Contains(got, "token") {
+		t.Fatalf("credentials not stripped: remote.origin.url = %q", got)
+	}
+	if got != "https://github.com/org/repo.git" {
+		t.Fatalf("unexpected URL after sanitize: %q", got)
+	}
+}
+
+// TestSanitizeRemoteURLNoOp verifies that a clean URL is left unchanged.
+func TestSanitizeRemoteURLNoOp(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+
+	cleanURL := "https://github.com/org/repo.git"
+	cmd := exec.Command("git", "-C", barePath, "remote", "set-url", "origin", cleanURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url failed: %s: %v", out, err)
+	}
+
+	sanitizeRemoteURL(barePath)
+
+	got := gitConfigGet(t, barePath, "remote.origin.url")
+	if got != cleanURL {
+		t.Fatalf("clean URL changed: got %q, want %q", got, cleanURL)
+	}
+}
+
+// TestSanitizeRemoteURLSSH verifies that SSH scp-style URLs are left unchanged.
+func TestSanitizeRemoteURLSSH(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+
+	sshURL := "git@github.com:org/repo.git"
+	cmd := exec.Command("git", "-C", barePath, "remote", "set-url", "origin", sshURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set-url failed: %s: %v", out, err)
+	}
+
+	sanitizeRemoteURL(barePath)
+
+	got := gitConfigGet(t, barePath, "remote.origin.url")
+	if got != sshURL {
+		t.Fatalf("SSH URL changed: got %q, want %q", got, sshURL)
+	}
+}
+
 // TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty verifies step 4's
 // safe-scan gating: when the cache has multiple refs/remotes/origin/*
 // entries, none match the common defaults, and none match the bare HEAD
