@@ -122,7 +122,10 @@ func TestSubscriberAPI(t *testing.T) {
 		}
 		found := false
 		for _, s := range subscribers {
-			if s.UserID == testUserID && s.UserType == "member" && s.Reason == "manual" {
+			// CreateIssue auto-subscribes the creator with reason "creator";
+			// the subsequent manual subscribe is ON CONFLICT DO NOTHING,
+			// so the reason stays "creator". Accept either.
+			if s.UserID == testUserID && s.UserType == "member" && (s.Reason == "manual" || s.Reason == "creator") {
 				found = true
 				break
 			}
@@ -233,6 +236,15 @@ func TestSubscriberAPI(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to find test agent: %v", err)
 		}
+
+		// CreateIssue auto-subscribes the member creator. Remove that
+		// subscription first so we can verify that the agent subscribe
+		// endpoint does NOT re-subscribe the member behind X-User-ID.
+		_ = testHandler.Queries.RemoveIssueSubscriber(ctx, db.RemoveIssueSubscriberParams{
+			IssueID:  parseUUID(issueID),
+			UserType: "member",
+			UserID:   parseUUID(testUserID),
+		})
 
 		// Subscribe with X-Agent-ID set — no body, so the handler must default
 		// to subscribing the agent itself (not the member behind X-User-ID).
