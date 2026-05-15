@@ -792,10 +792,14 @@ func parseSkillsShParts(raw string) (owner, repo, skillName string, err error) {
 		return "", "", "", fmt.Errorf("invalid URL: %w", err)
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("expected URL format: skills.sh/{owner}/{repo}/{skill-name}, got: %s", parsed.Path)
+	switch len(parts) {
+	case 2:
+		return parts[0], parts[1], "", nil
+	case 3:
+		return parts[0], parts[1], parts[2], nil
+	default:
+		return "", "", "", fmt.Errorf("expected URL format: skills.sh/{owner}/{repo} or skills.sh/{owner}/{repo}/{skill-name}, got: %s", parsed.Path)
 	}
-	return parts[0], parts[1], parts[2], nil
 }
 
 func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, error) {
@@ -920,6 +924,115 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	}
 
 	return result, nil
+}
+
+func fetchAllFromSkillsSh(httpClient *http.Client, rawURL string) ([]*importedSkill, error) {
+	owner, repo, _, err := parseSkillsShParts(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
+	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
+
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect repository %s/%s: %w", owner, repo, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to inspect repository %s/%s: HTTP %d", owner, repo, resp.StatusCode)
+	}
+
+	var tree githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return nil, fmt.Errorf("failed to inspect repository %s/%s: %w", owner, repo, err)
+	}
+
+	skillPaths := extractSkillMdPaths(tree.Tree)
+	if len(skillPaths) == 0 {
+		return nil, fmt.Errorf("no SKILL.md files found in repository %s/%s", owner, repo)
+	}
+
+	var results []*importedSkill
+	for _, skillPath := range skillPaths {
+		skillDir := skillDirFromSkillFilePath(skillPath)
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillPath))
+		if err != nil {
+			slog.Warn("batch import: failed to download SKILL.md", "path", skillPath, "error", err)
+			continue
+		}
+
+		name, description := parseSkillFrontmatter(string(body))
+		if name == "" {
+			// Derive name from directory
+			if skillDir != "" {
+				parts := strings.Split(skillDir, "/")
+				name = parts[len(parts)-1]
+			} else {
+				name = repo
+			}
+		}
+
+		result := &importedSkill{
+			name:        name,
+			description: description,
+			content:     string(body),
+			origin: map[string]any{
+				"type":       "skills_sh",
+				"source_url": rawURL,
+				"owner":      owner,
+				"repo":       repo,
+				"skill":      name,
+			},
+		}
+
+		// Collect supporting files
+		contentsURL := buildGitHubContentsURL(owner, repo, skillDir, defaultBranch)
+		dirResp, err := doGitHubAPIGet(httpClient, contentsURL)
+		if err == nil && dirResp.StatusCode == http.StatusOK {
+			var entries []githubContentEntry
+			if err := json.NewDecoder(dirResp.Body).Decode(&entries); err == nil {
+				var allFiles []githubContentEntry
+				collectGitHubFiles(httpClient, entries, &allFiles, contentsURL)
+				basePath := ""
+				if skillDir != "" {
+					basePath = skillDir + "/"
+				}
+				for _, entry := range allFiles {
+					if entry.DownloadURL == "" {
+						continue
+					}
+					fileBody, err := fetchRawFile(httpClient, entry.DownloadURL)
+					if err != nil {
+						if isCapError(err) {
+							slog.Warn("batch import: file too large", "path", entry.Path, "error", err)
+							break
+						}
+						continue
+					}
+					relPath := strings.TrimPrefix(entry.Path, basePath)
+					if err := result.addFile(relPath, string(fileBody)); err != nil {
+						slog.Warn("batch import: addFile failed", "path", relPath, "error", err)
+						break
+					}
+				}
+			}
+			dirResp.Body.Close()
+		} else if dirResp != nil {
+			dirResp.Body.Close()
+		}
+
+		results = append(results, result)
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("failed to import any skills from repository %s/%s", owner, repo)
+	}
+	return results, nil
 }
 
 func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, error) {
@@ -1611,6 +1724,66 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	case sourceClawHub:
 		imported, err = fetchFromClawHub(httpClient, normalized)
 	case sourceSkillsSh:
+		// Check if this is a 2-segment URL (batch import all skills from repo)
+		_, _, skillName, _ := parseSkillsShParts(normalized)
+		if skillName == "" {
+			allImported, err := fetchAllFromSkillsSh(httpClient, normalized)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+
+			type batchResult struct {
+				Imported []any    `json:"imported"`
+				Errors   []string `json:"errors"`
+			}
+			result := batchResult{
+				Imported: make([]any, 0, len(allImported)),
+				Errors:   make([]string, 0),
+			}
+
+			actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
+			for _, imp := range allImported {
+				files := make([]CreateSkillFileRequest, 0, len(imp.files))
+				for _, f := range imp.files {
+					if !validateFilePath(f.path) {
+						continue
+					}
+					files = append(files, CreateSkillFileRequest{
+						Path:    f.path,
+						Content: f.content,
+					})
+				}
+
+				config := map[string]any{}
+				if imp.origin != nil {
+					config["origin"] = imp.origin
+				}
+
+				resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+					WorkspaceID: workspaceUUID,
+					CreatorID:   creatorUUID,
+					Name:        imp.name,
+					Description: imp.description,
+					Content:     imp.content,
+					Config:      config,
+					Files:       files,
+				})
+				if err != nil {
+					if isUniqueViolation(err) {
+						result.Errors = append(result.Errors, fmt.Sprintf("skill %q: already exists", imp.name))
+					} else {
+						result.Errors = append(result.Errors, fmt.Sprintf("skill %q: %s", imp.name, err.Error()))
+					}
+					continue
+				}
+				h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+				result.Imported = append(result.Imported, resp)
+			}
+
+			writeJSON(w, http.StatusCreated, result)
+			return
+		}
 		imported, err = fetchFromSkillsSh(httpClient, normalized)
 	case sourceGitHub:
 		imported, err = fetchFromGitHub(httpClient, normalized)

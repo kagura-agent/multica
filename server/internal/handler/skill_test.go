@@ -1226,3 +1226,36 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestParseSkillsShParts_TwoSegments(t *testing.T) {
+	owner, repo, skillName, err := parseSkillsShParts("https://skills.sh/acme/tools")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if owner != "acme" || repo != "tools" || skillName != "" {
+		t.Fatalf("got owner=%q repo=%q skill=%q, want acme/tools/empty", owner, repo, skillName)
+	}
+}
+
+func TestParseSkillsShParts_ThreeSegments(t *testing.T) {
+	owner, repo, skillName, err := parseSkillsShParts("https://skills.sh/acme/tools/linter")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if owner != "acme" || repo != "tools" || skillName != "linter" {
+		t.Fatalf("got owner=%q repo=%q skill=%q, want acme/tools/linter", owner, repo, skillName)
+	}
+}
+
+func TestParseSkillsShParts_InvalidSegments(t *testing.T) {
+	for _, input := range []string{
+		"https://skills.sh/onlyone",
+		"https://skills.sh/a/b/c/d",
+		"https://skills.sh/",
+	} {
+		_, _, _, err := parseSkillsShParts(input)
+		if err == nil {
+			t.Errorf("expected error for %q, got nil", input)
+		}
+	}
+}
