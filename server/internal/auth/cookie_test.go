@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestIsSecureCookie(t *testing.T) {
@@ -78,6 +79,31 @@ func TestSetAuthCookies_HTTPSelfHost(t *testing.T) {
 		if c.Domain != "" {
 			t.Errorf("cookie %q has Domain=%q; IP-address Domain would be rejected by the browser (RFC 6265)", c.Name, c.Domain)
 		}
+	}
+}
+
+func TestParseAuthTokenTTL(t *testing.T) {
+	cases := []struct {
+		name     string
+		raw      string
+		wantDur  time.Duration
+		wantOK   bool
+	}{
+		{"empty string", "", 0, false},
+		{"valid 3600", "3600", time.Hour, true},
+		{"valid 86400", "86400", 24 * time.Hour, true},
+		{"negative", "-100", 0, false},
+		{"zero", "0", 0, false},
+		{"non-numeric", "abc", 0, false},
+		{"whitespace trimmed", " 7200 ", 2 * time.Hour, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseAuthTokenTTL(tc.raw)
+			if ok != tc.wantOK || got != tc.wantDur {
+				t.Errorf("parseAuthTokenTTL(%q) = (%v, %v), want (%v, %v)", tc.raw, got, ok, tc.wantDur, tc.wantOK)
+			}
+		})
 	}
 }
 

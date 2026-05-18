@@ -28,24 +28,38 @@ var (
 	authTokenTTLCached     time.Duration
 )
 
+// parseAuthTokenTTL parses a raw AUTH_TOKEN_TTL value (seconds string) into a
+// duration. Returns the parsed duration and true on success; zero and false
+// when the input is empty or invalid.
+func parseAuthTokenTTL(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	secs, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || secs <= 0 {
+		return 0, false
+	}
+	return time.Duration(secs) * time.Second, true
+}
+
 // AuthTokenTTL returns the configured auth token lifetime. It reads the
-// AUTH_TOKEN_TTL environment variable (in seconds) once and caches the result.
-// When the variable is unset or invalid the default of 30 days is used.
+// AUTH_TOKEN_TTL environment variable (in seconds) on first call and caches
+// the result. When the variable is unset or invalid the default of 30 days
+// is used.
 func AuthTokenTTL() time.Duration {
 	authTokenTTLOnce.Do(func() {
-		authTokenTTLCached = defaultAuthTokenTTL
-		raw := strings.TrimSpace(os.Getenv("AUTH_TOKEN_TTL"))
-		if raw == "" {
+		raw := os.Getenv("AUTH_TOKEN_TTL")
+		if ttl, ok := parseAuthTokenTTL(raw); ok {
+			authTokenTTLCached = ttl
+			slog.Info("auth token TTL configured", "seconds", int(ttl.Seconds()))
 			return
 		}
-		secs, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || secs <= 0 {
+		authTokenTTLCached = defaultAuthTokenTTL
+		if strings.TrimSpace(raw) != "" {
 			slog.Warn("AUTH_TOKEN_TTL is not a valid positive integer; using default",
 				"value", raw, "default_seconds", int(defaultAuthTokenTTL.Seconds()))
-			return
 		}
-		authTokenTTLCached = time.Duration(secs) * time.Second
-		slog.Info("auth token TTL configured", "seconds", secs)
 	})
 	return authTokenTTLCached
 }
