@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -55,6 +56,9 @@ func parseAuthTokenTTL(raw string) (time.Duration, bool) {
 	if err != nil || secs <= 0 {
 		return 0, false
 	}
+	if secs > int64(math.MaxInt64/int64(time.Second)) {
+		return 0, false
+	}
 	d := time.Duration(secs) * time.Second
 	if d > 10*365*24*time.Hour {
 		slog.Warn("AUTH_TOKEN_TTL exceeds 10 years; accepting but verify this is intentional",
@@ -64,7 +68,7 @@ func parseAuthTokenTTL(raw string) (time.Duration, bool) {
 }
 
 // AuthTokenTTL returns the configured auth token lifetime. It reads the
-// AUTH_TOKEN_TTL environment variable (in seconds) on first call and caches
+// AUTH_TOKEN_TTL environment variable (Go duration string or integer seconds) on first call and caches
 // the result. When the variable is unset or invalid the default of 30 days
 // is used.
 func AuthTokenTTL() time.Duration {
