@@ -84,10 +84,10 @@ func TestSetAuthCookies_HTTPSelfHost(t *testing.T) {
 
 func TestParseAuthTokenTTL(t *testing.T) {
 	cases := []struct {
-		name     string
-		raw      string
-		wantDur  time.Duration
-		wantOK   bool
+		name    string
+		raw     string
+		wantDur time.Duration
+		wantOK  bool
 	}{
 		{"empty string", "", 0, false},
 		{"valid 3600", "3600", time.Hour, true},
